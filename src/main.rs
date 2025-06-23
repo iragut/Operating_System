@@ -11,18 +11,17 @@ use game_os::println;
 pub extern "C" fn _start() -> ! {
     println!("Hello World{}", "!");
 
-    #[cfg(test)]
-    test_main();
+    game_os::init();
 
-    loop {}
+    println!("It did not crash!");
+    game_os::hlt_loop();
 }
 
-/// This function is called on panic.
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("{}", info);
-    loop {}
+    game_os::hlt_loop();
 }
 
 #[cfg(test)]
