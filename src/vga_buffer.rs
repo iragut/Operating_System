@@ -2,16 +2,27 @@ use core::fmt;
 use lazy_static::lazy_static;
 use spin::Mutex;
 use volatile::Volatile;
+use x86_64::instructions::port::Port;
 
 lazy_static! {
     /// A global `Writer` instance that can be used for printing to the VGA text buffer.
     ///
     /// Used by the `print!` and `println!` macros.
-    pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
-        column_position: 0,
-        color_code: ColorCode::new(Color::Yellow, Color::Black),
-        buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
-    });
+    pub static ref WRITER: Mutex<Writer> = {
+        let mut writer = Writer {
+            column_position: 0,
+            color_code: ColorCode::new(Color::Yellow, Color::Black),
+            buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
+            cursor_x: 0,
+            cursor_y: (BUFFER_HEIGHT - 1) as u16,
+        };
+        
+        // Initialize cursor when WRITER is created
+        writer.enable_cursor(14, 15);  // Normal cursor
+        writer.update_cursor(writer.cursor_x, writer.cursor_y);
+        
+        Mutex::new(writer)
+    };
 }
 
 /// The standard color palette in VGA text mode.
@@ -76,9 +87,14 @@ pub struct Writer {
     column_position: usize,
     color_code: ColorCode,
     buffer: &'static mut Buffer,
+    cursor_x: u16,
+    cursor_y: u16,
 }
 
 impl Writer {
+    pub fn get_column_position(&self) -> i32 {
+        self.column_position as i32
+    }
     /// Writes an ASCII byte to the buffer.
     ///
     /// Wraps lines at `BUFFER_WIDTH`. Supports the `\n` newline character.
@@ -101,6 +117,7 @@ impl Writer {
                 self.column_position += 1;
             }
         }
+        self.update_cursor(self.column_position as u16, self.cursor_y);
     }
 
     /// Writes the given ASCII string to the buffer.
@@ -129,6 +146,7 @@ impl Writer {
         }
         self.clear_row(BUFFER_HEIGHT - 1);
         self.column_position = 0;
+        self.update_cursor(0, (BUFFER_HEIGHT - 1) as u16);
     }
 
     /// Clears a row by overwriting it with blank characters.
@@ -139,6 +157,64 @@ impl Writer {
         };
         for col in 0..BUFFER_WIDTH {
             self.buffer.chars[row][col].write(blank);
+        }
+    }
+
+    pub fn enable_cursor(&mut self, cursor_start: u8, cursor_end: u8) {
+        unsafe {
+            let mut cmd_port: Port<u8> = Port::new(0x3D4);
+            let mut data_port: Port<u8> = Port::new(0x3D5);
+            
+            // Set cursor start - split read and write
+            cmd_port.write(0x0A);
+            let current_start = data_port.read();
+            data_port.write((current_start & 0xC0) | cursor_start);
+            
+            // Set cursor end - split read and write  
+            cmd_port.write(0x0B);
+            let current_end = data_port.read();
+            data_port.write((current_end & 0xE0) | cursor_end);
+        }
+    }
+    
+    pub fn disable_cursor(&mut self) {
+        unsafe {
+            let mut cmd_port: Port<u8> = Port::new(0x3D4);
+            let mut data_port: Port<u8> = Port::new(0x3D5);
+            
+            cmd_port.write(0x0A);
+            data_port.write(0x20);
+        }
+    }
+    
+    pub fn update_cursor(&mut self, x: u16, y: u16) {
+        let pos = y * BUFFER_WIDTH as u16 + x;
+        
+        unsafe {
+            let mut cmd_port: Port<u8> = Port::new(0x3D4);
+            let mut data_port: Port<u8> = Port::new(0x3D5);
+            
+            // Send low byte
+            cmd_port.write(0x0F);
+            data_port.write((pos & 0xFF) as u8);
+            
+            // Send high byte
+            cmd_port.write(0x0E);
+            data_port.write((pos >> 8) as u8);
+        }
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        if self.column_position > 0 {
+            self.column_position -= 1;
+            self.update_cursor(self.column_position as u16, self.cursor_y);
+        }
+    }
+    
+    pub fn move_cursor_right(&mut self) {
+        if self.column_position < BUFFER_WIDTH - 1 {
+            self.column_position += 1;
+            self.update_cursor(self.column_position as u16, self.cursor_y);
         }
     }
 }

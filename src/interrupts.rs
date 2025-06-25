@@ -1,4 +1,5 @@
-use crate::{gdt, print, println};
+use crate::shell::SHELL;
+use crate::{gdt, println};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
@@ -101,8 +102,10 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
-                DecodedKey::Unicode(character) => print!("{}", character),
-                DecodedKey::RawKey(key) => print!("{:?}", key),
+                DecodedKey::Unicode(character) =>{ SHELL.lock().handle_char(character)},
+                DecodedKey::RawKey(key) => {
+                    SHELL.lock().handle_special(key);
+                }
             }
         }
     }
