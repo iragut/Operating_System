@@ -12,9 +12,9 @@ lazy_static! {
 
 pub struct Shell {
     index_buf: i32,
-    buffer: String,
-    history: Vec<String>,
-    commands: Vec<(&'static str, fn(&str, &mut Shell))>,
+    pub buffer: String,
+    pub history: Vec<String>,
+    pub commands: Vec<(&'static str, fn(&str, &mut Shell))>,
 }
 
 impl Shell {
@@ -29,13 +29,23 @@ impl Shell {
         shell
     }
 
-    fn shift_all_charcters_left(&mut self) {
+    fn delete_char_and_redraw(&mut self) {
         let mut writer = crate::vga_buffer::WRITER.lock();
-        for i in 0..self.index_buf {
-            let c = self.buffer.chars().nth(i as usize).unwrap_or(' ');
-            writer.move_cursor_left();
-            let _ = writer.write_char(c);
+        
+        let index = writer.get_column_position() - 1;
+        self.buffer.remove(index as usize);
+        self.index_buf -= 1;
+        
+        let row = writer.get_cursor_y() as usize;
+        writer.clear_row(row);
+        writer.set_column_position(0);
+        
+        for ch in self.buffer.chars() {
+            let _ = writer.write_char(ch);
         }
+        
+        writer.move_cursor_left();
+        writer.move_cursor_left();
     }
 
     pub fn handle_char(&mut self, c: char) {
@@ -46,17 +56,18 @@ impl Shell {
                 } else {
                     let mut writer = crate::vga_buffer::WRITER.lock();
 
-                    // if self.index_buf > writer.get_column_position() {
-                    //     self.buffer.remove(self.index_buf as usize);
-
-                    // }
+                    if self.index_buf > writer.get_column_position() && writer.get_column_position() > 0 {
+                        drop(writer);
+                        self.delete_char_and_redraw();
+                    } else if writer.get_column_position() > 0 {
                     
-                    self.index_buf -= 1;
-                    self.buffer.pop();
+                        self.index_buf -= 1;
+                        self.buffer.pop();
 
-                    writer.move_cursor_left();
-                    let _ = writer.write_char(' ');
-                    writer.move_cursor_left();
+                        writer.move_cursor_left();
+                        let _ = writer.write_char(' ');
+                        writer.move_cursor_left();
+                    }
                     
                 }
             }
@@ -72,10 +83,9 @@ impl Shell {
                     let str = self.buffer.clone();
                     func(&str, self);
                 } else {
-                    println!("Unknown command: {}", self.buffer);
+                    println!("\nUnknown command: {}", self.buffer);
                 }
 
-                
                 self.index_buf = 0;
                 self.buffer.clear();
             }
@@ -99,6 +109,9 @@ impl Shell {
             KeyCode::ArrowRight => {
                 let mut writer = crate::vga_buffer::WRITER.lock();
                 writer.move_cursor_right();
+            }
+            KeyCode::ArrowUp => {
+                // TODO: Implement history navigation
             }
             _ => {}
             

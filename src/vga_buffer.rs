@@ -11,7 +11,7 @@ lazy_static! {
     pub static ref WRITER: Mutex<Writer> = {
         let mut writer = Writer {
             column_position: 0,
-            color_code: ColorCode::new(Color::Yellow, Color::Black),
+            color_code: ColorCode::new(Color::LightCyan, Color::Black),
             buffer: unsafe { &mut *(0xb8000 as *mut Buffer) },
             cursor_x: 0,
             cursor_y: (BUFFER_HEIGHT - 1) as u16,
@@ -92,8 +92,21 @@ pub struct Writer {
 }
 
 impl Writer {
+    pub fn set_column_position(&mut self, position: usize) {
+        if position < BUFFER_WIDTH {
+            self.column_position = position;
+        } else {
+            self.column_position = BUFFER_WIDTH - 1; // Clamp to max width
+        }
+    }
     pub fn get_column_position(&self) -> i32 {
         self.column_position as i32
+    }
+    pub fn get_cursor_x(&self) -> u16 {
+        self.cursor_x
+    }
+    pub fn get_cursor_y(&self) -> u16 {
+        self.cursor_y
     }
     /// Writes an ASCII byte to the buffer.
     ///
@@ -150,7 +163,7 @@ impl Writer {
     }
 
     /// Clears a row by overwriting it with blank characters.
-    fn clear_row(&mut self, row: usize) {
+    pub fn clear_row(&mut self, row: usize) {
         let blank = ScreenChar {
             ascii_character: b' ',
             color_code: self.color_code,
