@@ -26,6 +26,8 @@ impl Shell {
             commands: Vec::new(),
         };
         shell.add_command("help", Shell::help_command);
+        shell.add_command("ps", Shell::ps_command);
+
         shell
     }
 
@@ -127,6 +129,19 @@ impl Shell {
         println!("\nAvailable commands:");
         for (name, _) in &shell.commands {
             println!("- {}", name);
+        }
+    }
+
+    fn ps_command(_args: &str, _shell: &mut Shell) {
+        let process_manager = crate::process::PROCESS_TABLE.lock();
+        let active_count = process_manager.get_active_process_count();
+        let total_count = process_manager.get_total_process_count();
+        
+        println!("\nActive Processes: {}/{}", active_count, total_count);
+        for i in 1..total_count + 1 {
+            if let Ok(process) = process_manager.get_process(i as u64) {
+                println!("PID: {}, Name: {}, State: {:?}", process.get_pid(), process.get_name(), process.get_state());
+            }
         }
     }
     

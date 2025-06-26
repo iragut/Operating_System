@@ -11,7 +11,6 @@ use bootloader::{BootInfo, entry_point};
 use game_os::memory::{self, BootInfoFrameAllocator};
 use game_os::allocator;
 use x86_64::VirtAddr;
-
 extern crate alloc;
 
 entry_point!(kernel_main);
@@ -31,7 +30,6 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
         .expect("heap initialization failed");
 
     let mut _shell = Shell::new();
-
 
     #[cfg(test)]
     test_main();
