@@ -92,7 +92,7 @@ pub fn map_process_memory_region(page_table_phys: PhysAddr,region: &MemoryRegion
         let frame = allocate_frame().ok_or(MemoryError::OutOfMemory)?;
         
         unsafe {
-            mapper.map_to(page, frame, region.permissions, &mut EmptyFrameAllocator)
+            mapper.map_to(page, frame, region.permissions, &mut ProcessFrameAllocator)
                 .map_err(|_| MemoryError::MappingFailed)?
                 .flush();
         }
@@ -257,7 +257,9 @@ impl BootInfoFrameAllocator {
 
 pub struct EmptyFrameAllocator;
 
-unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
+pub struct ProcessFrameAllocator;
+
+unsafe impl FrameAllocator<Size4KiB> for ProcessFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
         let mut allocator_guard = FRAME_ALLOCATOR.lock();
         if let Some(ref mut allocator) = *allocator_guard {
@@ -265,6 +267,12 @@ unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
         } else {
             None
         }
+    }
+}
+
+unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        None
     }
 }
 
