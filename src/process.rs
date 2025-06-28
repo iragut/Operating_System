@@ -1,9 +1,10 @@
 use core::sync::atomic::AtomicUsize;
 use alloc::{string::String, vec::Vec};
 use alloc::collections::BTreeMap;
-use x86_64::PhysAddr;
 use spin::Mutex;
 use lazy_static::lazy_static;
+
+use crate::memory::{self, ProcessMemoryLayout};
 
 lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<ProcessTable> = Mutex::new(ProcessTable::new());
@@ -88,11 +89,8 @@ pub struct ProcessControlBlock {
     pid: u64,
     parent_pid: Option<u64>, 
     name: String,
-    
-    state: ProcessState,
-    exit_code: Option<i32>,
-    
-    page_table: Option<PhysAddr>,
+    state: ProcessState,    
+    page_table: ProcessMemoryLayout,
     priority: u8,
     creation_time: u64,
 }
@@ -171,19 +169,40 @@ impl ProcessTable {
 
     pub fn set_process_state(&mut self, pid: u64, state: ProcessState) -> ProcessResult<()> {
         let index = self.find_process_index(pid)?;
-        if ProcessState::Running == state {
-            let  process = self.get_running_process();
-            if process.is_some() {
-                return Err(ProcessError::InvalidState);
+        
+        let process = self.processes[index].as_ref().unwrap();
+        let current_state = process.state;
+        let page_table_phys = process.page_table.page_table_phys();
+        
+        // Only one process can be RUNNING at a time
+        if state == ProcessState::Running && self.get_running_process().is_some() {
+            return Err(ProcessError::InvalidState);
+        }
+        
+        match (current_state, state) {
+            (_, ProcessState::Running) => {
+                unsafe {
+                    memory::switch_to_page_table(page_table_phys);
+                }
             }
+            
+            (ProcessState::Running, _) => {
+                unsafe {
+                    memory::switch_to_kernel_page_table();
+                }
+                self.running_process = None;
+            }            
+            _ => {}
+        }
+        
+        // Update the process state
+        self.processes[index].as_mut().unwrap().state = state;
+        
+        // Update running process tracking if we just became RUNNING
+        if state == ProcessState::Running {
             self.running_process = Some(self.processes[index].as_ref().unwrap().clone());
         }
-
-        if self.processes[index].as_mut().unwrap().state == ProcessState::Running && state != ProcessState::Running {
-            self.running_process = None;
-        }
-
-        self.processes[index].as_mut().unwrap().state = state;
+        
         Ok(())
     }
 
@@ -239,8 +258,6 @@ impl ProcessTable {
             .collect()
     }
 
-
-
 }
 
 impl ProcessControlBlock {
@@ -250,8 +267,13 @@ impl ProcessControlBlock {
             parent_pid,
             name,
             state: ProcessState::New,
-            exit_code: None,
-            page_table: None,
+            page_table: {
+                let phys_addr =  memory::create_physical_addr()
+                    .expect("New physical addr for process fail");
+                let process_memory = memory::setup_standard_process_layout(phys_addr, pid)
+                    .expect("Memory fail for ne process");
+                process_memory
+                },
             priority: prior,
             creation_time: 0, 
         }

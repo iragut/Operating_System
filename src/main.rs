@@ -31,6 +31,16 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     memory::init_global_memory_management(phys_mem_offset, frame_allocator);
 
+    let test_page_table = memory::create_physical_addr()
+        .expect("Failed to create page table");
+        
+    let test_layout = memory::setup_standard_process_layout(test_page_table, 999)
+        .expect("Failed to setup layout");
+        
+    println!("Created page table at: {:?}", test_page_table);
+    println!("Code region: {:?} - {:?}", 
+        test_layout.code_start(), 
+        test_layout.code_start() + 0x0010_0000u64);
 
     let mut _shell = Shell::new();
 

@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use spin::Mutex;
 use x86_64::{structures::paging::PageTable, VirtAddr};
 use x86_64::structures::paging::{OffsetPageTable, PageTableFlags};
-use x86_64::registers::control::Cr3;
+use x86_64::registers::control::{Cr3, Cr3Flags};
 use bootloader::bootinfo::MemoryMap;
 use x86_64::structures::paging::{Page, Mapper};
 use x86_64::{PhysAddr, structures::paging::{PhysFrame, Size4KiB, FrameAllocator}};
@@ -11,6 +11,7 @@ use bootloader::bootinfo::MemoryRegionType;
 lazy_static! {
     static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
     static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
+    static ref KERNEL_PHYS_ADDRESS: Mutex<Option<PhysAddr>> = Mutex::new(None);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,7 @@ pub struct BootInfoFrameAllocator {
 }
 
 // Memory region descriptor
+#[derive(Clone)]
 pub struct MemoryRegion {
     start: VirtAddr,
     size: usize, 
@@ -34,6 +36,7 @@ pub struct MemoryRegion {
 }
 
 // Memory layout for a process
+#[derive(Clone)]
 pub struct ProcessMemoryLayout {
     code_region: MemoryRegion,
     data_region: MemoryRegion,
@@ -51,7 +54,7 @@ pub fn allocate_frame() -> Option<PhysFrame> {
     }
 }
 
-pub fn create_table_page() -> Result<PhysAddr, MemoryError> {
+pub fn create_physical_addr() -> Result<PhysAddr, MemoryError> {
     let physical_memory_offset = 
     get_physical_memory_offset().ok_or(MemoryError::NotInitialized)?;
 
@@ -75,7 +78,17 @@ pub fn create_table_page() -> Result<PhysAddr, MemoryError> {
     Ok(new_frame.start_address())
 }
 
-pub fn map_process_memory_region(page_table_phys: PhysAddr,region: &MemoryRegion) -> Result<(), MemoryError> {
+pub unsafe fn switch_to_page_table(page_table_phys: PhysAddr) {
+    let phys_frame = PhysFrame::containing_address(page_table_phys);
+    Cr3::write(phys_frame, Cr3Flags::empty());
+}
+
+pub unsafe fn switch_to_kernel_page_table(){
+    let phys_addr = KERNEL_PHYS_ADDRESS.lock().expect("Get kernel addres (physical) FAIL");
+    switch_to_page_table(phys_addr);
+}
+
+pub fn map_process_memory_region(page_table_phys: PhysAddr, region: &MemoryRegion) -> Result<(), MemoryError> {
     let phys_mem_offset = get_physical_memory_offset()
         .ok_or(MemoryError::NotInitialized)?;
     
@@ -109,8 +122,12 @@ pub fn init_global_memory_management(
     // Store physical memory offset globally
     // Store frame allocator globally  
     // Initialize memory management subsystem
+
     *PHYSICAL_MEMORY_OFFSET.lock() = Some(phys_mem_offset);
     *FRAME_ALLOCATOR.lock() = Some(frame_allocator);
+
+    let kernel_addr = Cr3::read();
+    *KERNEL_PHYS_ADDRESS.lock() = Some(kernel_addr.0.start_address());
 }
 
 pub fn get_physical_memory_offset() -> Option<VirtAddr> {
