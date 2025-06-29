@@ -26,6 +26,7 @@ fn main(boot_info: &'static BootInfo) -> ! {
     allocator::init_heap(&mut mapper, &mut frame_allocator)
         .expect("heap initialization failed");
 
+    memory::init_global_memory_management(phys_mem_offset, frame_allocator);
     test_main();
     loop {}
 }

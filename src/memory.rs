@@ -8,11 +8,6 @@ use x86_64::structures::paging::{Page, Mapper};
 use x86_64::{PhysAddr, structures::paging::{PhysFrame, Size4KiB, FrameAllocator}};
 use bootloader::bootinfo::MemoryRegionType;
 
-lazy_static! {
-    static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
-    static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
-    static ref KERNEL_PHYS_ADDRESS: Mutex<Option<PhysAddr>> = Mutex::new(None);
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryError {
@@ -21,6 +16,7 @@ pub enum MemoryError {
     InvalidAddress,
     MappingFailed,
 }
+
 
 pub struct BootInfoFrameAllocator {
     memory_map: &'static MemoryMap,
@@ -45,6 +41,39 @@ pub struct ProcessMemoryLayout {
     page_table_phys: PhysAddr,
 }
 
+pub struct EmptyFrameAllocator;
+
+pub struct ProcessFrameAllocator;
+
+
+lazy_static! {
+    static ref PHYSICAL_MEMORY_OFFSET: Mutex<Option<VirtAddr>> = Mutex::new(None);
+    static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
+    static ref KERNEL_PHYS_ADDRESS: Mutex<Option<PhysAddr>> = Mutex::new(None);
+}
+
+pub fn init_global_memory_management(
+    phys_mem_offset: VirtAddr,
+    frame_allocator: BootInfoFrameAllocator
+) {
+    // Store physical memory offset globally
+    // Store frame allocator globally  
+    // Initialize memory management subsystem
+
+    *PHYSICAL_MEMORY_OFFSET.lock() = Some(phys_mem_offset);
+    *FRAME_ALLOCATOR.lock() = Some(frame_allocator);
+
+    let kernel_addr = Cr3::read();
+    *KERNEL_PHYS_ADDRESS.lock() = Some(kernel_addr.0.start_address());
+}
+
+pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
+    unsafe {
+        let level_4_table = active_level_4_table(physical_memory_offset);
+        OffsetPageTable::new(level_4_table, physical_memory_offset)
+    }
+}
+
 pub fn allocate_frame() -> Option<PhysFrame> {
     let mut allocator_guard = FRAME_ALLOCATOR.lock();
     if let Some(ref mut allocator) = *allocator_guard {
@@ -52,6 +81,10 @@ pub fn allocate_frame() -> Option<PhysFrame> {
     } else {
         None
     }
+}
+
+pub fn get_physical_memory_offset() -> Option<VirtAddr> {
+    *PHYSICAL_MEMORY_OFFSET.lock()
 }
 
 pub fn create_physical_addr() -> Result<PhysAddr, MemoryError> {
@@ -88,6 +121,20 @@ pub unsafe fn switch_to_kernel_page_table(){
     switch_to_page_table(phys_addr);
 }
 
+unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
+    -> &'static mut PageTable
+{
+
+    let (level_4_table_frame, _) = Cr3::read();
+
+    let phys = level_4_table_frame.start_address();
+    let virt = physical_memory_offset + phys.as_u64();
+    let page_table_ptr: *mut PageTable = virt.as_mut_ptr();
+
+    unsafe { &mut *page_table_ptr }
+}
+
+
 pub fn map_process_memory_region(page_table_phys: PhysAddr, region: &MemoryRegion) -> Result<(), MemoryError> {
     let phys_mem_offset = get_physical_memory_offset()
         .ok_or(MemoryError::NotInitialized)?;
@@ -112,47 +159,6 @@ pub fn map_process_memory_region(page_table_phys: PhysAddr, region: &MemoryRegio
     }
     
     Ok(())
-}
-
-
-pub fn init_global_memory_management(
-    phys_mem_offset: VirtAddr,
-    frame_allocator: BootInfoFrameAllocator
-) {
-    // Store physical memory offset globally
-    // Store frame allocator globally  
-    // Initialize memory management subsystem
-
-    *PHYSICAL_MEMORY_OFFSET.lock() = Some(phys_mem_offset);
-    *FRAME_ALLOCATOR.lock() = Some(frame_allocator);
-
-    let kernel_addr = Cr3::read();
-    *KERNEL_PHYS_ADDRESS.lock() = Some(kernel_addr.0.start_address());
-}
-
-pub fn get_physical_memory_offset() -> Option<VirtAddr> {
-    *PHYSICAL_MEMORY_OFFSET.lock()
-}
-
-impl MemoryRegion {
-    pub fn new(start: VirtAddr, size: usize, permissions: PageTableFlags) -> Self{
-        Self {
-            start,
-            size,
-            permissions
-        }
-
-    }
-
-    pub fn start_addr(&self) -> VirtAddr {
-        self.start
-    }
-    pub fn end_addr(&self) -> VirtAddr {
-        self.start + self.size as u64
-    }
-    pub fn get_permissions(&self) -> PageTableFlags {
-        self.permissions
-    }
 }
 
 pub fn setup_standard_process_layout(
@@ -197,6 +203,27 @@ pub fn setup_standard_process_layout(
     })
 }
 
+impl MemoryRegion {
+    pub fn new(start: VirtAddr, size: usize, permissions: PageTableFlags) -> Self{
+        Self {
+            start,
+            size,
+            permissions
+        }
+
+    }
+
+    pub fn start_addr(&self) -> VirtAddr {
+        self.start
+    }
+    pub fn end_addr(&self) -> VirtAddr {
+        self.start + self.size as u64
+    }
+    pub fn get_permissions(&self) -> PageTableFlags {
+        self.permissions
+    }
+}
+
 impl ProcessMemoryLayout {
     pub fn new( code_region: MemoryRegion, data_region: MemoryRegion, heap_region: MemoryRegion,
         stack_region: MemoryRegion, page_table_phys: PhysAddr
@@ -232,15 +259,6 @@ impl ProcessMemoryLayout {
     
 }
 
-
-unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        let frame = self.usable_frames().nth(self.next);
-        self.next += 1;
-        frame
-    }
-}
-
 impl BootInfoFrameAllocator {
     /// Create a FrameAllocator from the passed memory map.
     ///
@@ -253,9 +271,7 @@ impl BootInfoFrameAllocator {
             next: 0,
         }
     }
-}
 
-impl BootInfoFrameAllocator {
     /// Returns an iterator over the usable frames specified in the memory map.
     fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
         // get usable regions from memory map
@@ -272,9 +288,14 @@ impl BootInfoFrameAllocator {
     }
 }
 
-pub struct EmptyFrameAllocator;
 
-pub struct ProcessFrameAllocator;
+unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        let frame = self.usable_frames().nth(self.next);
+        self.next += 1;
+        frame
+    }
+}
 
 unsafe impl FrameAllocator<Size4KiB> for ProcessFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
@@ -291,24 +312,4 @@ unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
         None
     }
-}
-
-pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
-    unsafe {
-        let level_4_table = active_level_4_table(physical_memory_offset);
-        OffsetPageTable::new(level_4_table, physical_memory_offset)
-    }
-}
-
-unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
-    -> &'static mut PageTable
-{
-
-    let (level_4_table_frame, _) = Cr3::read();
-
-    let phys = level_4_table_frame.start_address();
-    let virt = physical_memory_offset + phys.as_u64();
-    let page_table_ptr: *mut PageTable = virt.as_mut_ptr();
-
-    unsafe { &mut *page_table_ptr }
 }
