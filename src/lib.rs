@@ -82,6 +82,7 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
 /// Entry point for `cargo xtest`
 #[cfg(test)]
 fn test_kernel_main(_boot_info: &'static BootInfo) -> ! {
+    // like before
     init();
     test_main();
     hlt_loop();

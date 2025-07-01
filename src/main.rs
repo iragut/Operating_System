@@ -11,6 +11,7 @@ use game_os::memory::{self, BootInfoFrameAllocator};
 use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
 use game_os::allocator;
 use x86_64::VirtAddr;
+
 extern crate alloc;
 
 entry_point!(kernel_main);
@@ -46,16 +47,6 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     core::mem::drop(reference_counted);
     println!("reference count is {} now", Rc::strong_count(&cloned_reference));
 
-    let test_page_table = memory::create_physical_addr()
-        .expect("Failed to create page table");
-        
-    let test_layout = memory::setup_standard_process_layout(test_page_table, 999)
-        .expect("Failed to setup layout");
-        
-    println!("Created page table at: {:?}", test_page_table);
-    println!("Code region: {:?} - {:?}", 
-        test_layout.code_start(), 
-        test_layout.code_start() + 0x0010_0000u64);
 
     // as before
     #[cfg(test)]
