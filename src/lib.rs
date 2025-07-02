@@ -22,6 +22,7 @@ pub mod vga_buffer;
 pub mod memory;
 pub mod process;
 pub mod assembly;
+pub mod sheduler;
 
 pub fn init() {
     gdt::init();

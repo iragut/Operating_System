@@ -5,6 +5,14 @@ use bootloader::bootinfo::MemoryMap;
 use x86_64::{PhysAddr, structures::paging::{PhysFrame, Size4KiB, FrameAllocator}};
 use bootloader::bootinfo::MemoryRegionType;
 
+const CODE_BASE: u64 = 0x0000_0000_0040_0000;   // 4MB
+const DATA_BASE: u64 = 0x0000_0000_0080_0000;   // 8MB
+const HEAP_BASE: u64 = 0x0000_0000_0100_0000;   // 16MB  
+const STACK_BASE: u64 = 0x0000_7fff_ffff_0000;  // High address
+
+const PAGE_SIZE: usize = 4096;
+const STACK_SIZE: usize = PAGE_SIZE * 4; // 16KB stack
+
 #[derive(Debug)]
 pub enum MemoryError {
     AllocationFailed,
@@ -60,13 +68,6 @@ impl MemoryRegion {
 
 impl ProcessMemoryLayout {
     pub fn create_simple_layout(entry_point: VirtAddr) -> Result<Self, MemoryError> {
-        const CODE_BASE: u64 = 0x0000_0000_0040_0000;   // 4MB
-        const DATA_BASE: u64 = 0x0000_0000_0080_0000;   // 8MB
-        const HEAP_BASE: u64 = 0x0000_0000_0100_0000;   // 16MB  
-        const STACK_BASE: u64 = 0x0000_7fff_ffff_0000;  // High address
-        
-        const PAGE_SIZE: usize = 4096;
-        const STACK_SIZE: usize = PAGE_SIZE * 4; // 16KB stack
         
         // Create memory regions
         let code_region = MemoryRegion::new(
