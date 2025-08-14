@@ -8,6 +8,7 @@ use core::panic::PanicInfo;
 use game_os::{println};
 use bootloader::{BootInfo, entry_point};
 use game_os::memory::{self, BootInfoFrameAllocator};
+use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
 use game_os::allocator;
 use x86_64::VirtAddr;
 

@@ -1,6 +1,6 @@
 use core::alloc::Layout;
 
-use crate::{assembly::{restore_context, save_context, setup_initial_stack}, memory::ProcessMemoryLayout};
+use crate::{assembly::setup_initial_stack, memory::ProcessMemoryLayout};
 use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use spin::Mutex;
@@ -8,6 +8,7 @@ use x86_64::VirtAddr;
 
 const STACK_SIZE: usize = 8 * 1024;
 const STACK_ALIGNMENT: usize = 16;
+
 
 lazy_static! {
     pub static ref PROCESS_TABLE: Mutex<ProcessTable> = Mutex::new(ProcessTable::new());
@@ -20,8 +21,9 @@ pub enum ProcessError {
     ProcessTableFull,
     InvalidMemoryLayout,
 }
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub enum ProcessState {
+
+#[derive(Clone, Copy)]
+enum ProcessState {
     New,
     Ready,
     Waiting,
@@ -31,9 +33,9 @@ pub enum ProcessState {
 
 #[derive(Clone)]
 pub struct ProcessTable {
-    pub processes: Vec<ProcessControlBlock>,
-    pub next_pid: u64,
-    pub current_process: Option<u64>
+    processes: Vec<ProcessControlBlock>,
+    next_pid: u64,
+    current_process: Option<u64>
 }
 
 #[derive(Clone, Copy)]
@@ -71,52 +73,14 @@ impl ProcessTable {
     pub fn get_process_mut(&mut self, pid: u64) -> Option<&mut ProcessControlBlock> {
         self.processes.iter_mut().find(|p| p.pid == pid)
     }
-
-    pub fn get_current_runnig_process(&mut self) -> Option<&mut ProcessControlBlock> {
-        if let Some(pid) = self.current_process {
-            self.get_process_mut(pid)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_current_running_process_pid(&self) -> Option<u64> {
-        self.current_process
-    }
-
-    pub fn set_current_running_process(&mut self, pid: u64) -> Result<(), ProcessError> {
-        if self.get_process(pid).is_some() {
-            self.current_process = Some(pid);
-            Ok(())
-        } else {
-            Err(ProcessError::InvalidPid)
-        }
-    }
     
-    pub fn find_next_ready_process_index(&self) -> Option<usize> {
-        self.processes
-            .iter()
-            .enumerate()
-            .find(|(_, p)| p.state == ProcessState::Ready)
-            .map(|(index, _)| index)
+    pub fn find_next_ready_process(&self) -> Option<usize> {
+        self.processes.iter()
+            .position(|p| matches!(p.state, ProcessState::Ready))
     }
-
-
 }
 
 impl ProcessControlBlock {
-    pub fn new(pid: u64, parent_pid: Option<u64>, page_table: ProcessMemoryLayout, priority: u8, creation_time: u64, pointer_stack: u64) -> Self {
-        Self {
-            pid,
-            parent_pid,
-            state: ProcessState::New,
-            page_table,
-            priority,
-            creation_time,
-            pointer_stack
-        }
-    }
-
     pub fn set_state(&mut self, state: ProcessState){
         self.state = state;
     }
@@ -146,14 +110,15 @@ pub fn create_process(entry_point: VirtAddr) -> Result<u64, ProcessError> {
     let initial_stack_pointer = setup_initial_stack(stack_base, entry_point);
     
     // Create PCB
-    let pcb = ProcessControlBlock::new(
-        0,
-        None,
-        memory_layout,
-        1,
-        0,
-        initial_stack_pointer
-    );
+    let pcb = ProcessControlBlock {
+        pid: 0,
+        parent_pid: None,
+        state: ProcessState::New,
+        page_table: memory_layout,
+        priority: 100,
+        creation_time: 0, // TODO: Get current time
+        pointer_stack: initial_stack_pointer
+    };
     
     // Add to process table
     let mut table = PROCESS_TABLE.lock();
@@ -164,15 +129,4 @@ pub fn create_process(entry_point: VirtAddr) -> Result<u64, ProcessError> {
     }
     
     Ok(pid)
-}
-
-pub fn switch_process(current_pid: u64, next_pid: u64) {
-    let mut table = PROCESS_TABLE.lock();
-
-    let next_stack = table.get_process(next_pid).unwrap().pointer_stack;
-
-    let current_process = table.get_process_mut(current_pid).unwrap();
-    current_process.pointer_stack = unsafe { save_context() };
-
-    unsafe { restore_context(next_stack) }
 }
