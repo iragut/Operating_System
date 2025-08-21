@@ -75,3 +75,25 @@ unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
 
     unsafe { &mut *page_table_ptr }
 }
+
+use alloc::vec;
+use alloc::boxed::Box;
+
+pub fn allocate_kernel_stack() -> VirtAddr {
+    // Allocate stack on the heap (which is already mapped!)
+    const STACK_SIZE: usize = 8192; // 8KB stack
+    
+    // Create a boxed array for the stack
+    let stack_vec = vec![0u8; STACK_SIZE];
+    let stack_box = stack_vec.into_boxed_slice();
+    
+    // Leak the box to get a 'static lifetime (we don't want it freed)
+    let stack_bottom = Box::leak(stack_box).as_ptr();
+    
+    // Return the TOP of the stack (stacks grow down)
+    let stack_top = unsafe {
+        VirtAddr::from_ptr(stack_bottom.add(STACK_SIZE))
+    };
+    
+    stack_top
+}

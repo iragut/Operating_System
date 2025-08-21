@@ -20,6 +20,8 @@ pub mod allocator;
 pub mod serial;
 pub mod vga_buffer;
 pub mod memory;
+pub mod process;
+pub mod asm_switch;
 
 pub fn init() {
     gdt::init();

@@ -5,7 +5,7 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
-use game_os::{println};
+use game_os::{println, print};
 use bootloader::{BootInfo, entry_point};
 use game_os::memory::{self, BootInfoFrameAllocator};
 use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
@@ -15,6 +15,41 @@ use x86_64::VirtAddr;
 extern crate alloc;
 
 entry_point!(kernel_main);
+
+extern "C" fn process_a() {
+    let mut counter: u64 = 0;
+    loop {
+        counter += 1;
+        if counter % 100000 == 0 {
+            crate::println!("A{}", counter / 100000);
+        }
+        unsafe { core::arch::asm!("nop"); }
+    }
+}
+
+extern "C" fn process_b() {
+    let mut counter: u64 = 1000;
+    loop {
+        counter += 1;
+        if counter % 100000 == 0 {
+            crate::println!("B{}", counter / 100000);
+        }
+        unsafe { core::arch::asm!("nop"); }
+    }
+}
+
+fn init_processes() {
+    use game_os::process::SCHEDULER;
+    
+    println!("Initializing process management...");
+    
+    let mut scheduler = SCHEDULER.lock();
+    scheduler.init_process_zero();
+    let pid1 = scheduler.create_kernel_process(process_a);
+    let pid2 = scheduler.create_kernel_process(process_b);
+    
+    println!("Created processes: 0 (kernel), {} (A), {} (B)", pid1, pid2);
+}
 
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     println!("Hello World{}", "!");
@@ -30,22 +65,8 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     allocator::init_heap(&mut mapper, &mut frame_allocator)
         .expect("heap initialization failed");
 
-    let heap_value = Box::new(41);
-    println!("heap_value at {:p}", heap_value);
-
-    // create a dynamically sized vector
-    let mut vec = Vec::new();
-    for i in 0..500 {
-        vec.push(i);
-    }
-    println!("vec at {:p}", vec.as_slice());
-
-    // create a reference counted vector -> will be freed when count reaches 0
-    let reference_counted = Rc::new(vec![1, 2, 3]);
-    let cloned_reference = reference_counted.clone();
-    println!("current reference count is {}", Rc::strong_count(&cloned_reference));
-    core::mem::drop(reference_counted);
-    println!("reference count is {} now", Rc::strong_count(&cloned_reference));
+    println!("Heap initialized successfully!");
+    init_processes();
 
 
     // as before
