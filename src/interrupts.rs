@@ -7,7 +7,7 @@ use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
 use spin::Mutex;
 use x86_64::registers::control::Cr2;
 use x86_64::instructions::port::Port;
-use crate::asm_switch::timer_interrupt_handler;
+use crate::asm_switch::do_switch;
 use crate::hlt_loop;
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -54,6 +54,23 @@ pub fn init_idt() {
     IDT.load();
 }
 
+pub extern "x86-interrupt" fn timer_interrupt_handler(mut stack_frame: InterruptStackFrame) {
+    static mut TICK_COUNT: u64 = 0;
+    
+    unsafe {
+        TICK_COUNT += 1;
+
+        if TICK_COUNT % 18 != 0 {
+            PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+            return;
+        }
+        
+        do_switch(&mut stack_frame);
+        
+        PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+}
+
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
@@ -76,13 +93,6 @@ extern "x86-interrupt" fn double_fault_handler(
 ) -> ! {
     panic!("EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
 }
-
-// extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-//     unsafe {
-//         PICS.lock()
-//             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
-//     }
-// }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
 
