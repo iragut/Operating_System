@@ -22,6 +22,7 @@ pub mod vga_buffer;
 pub mod memory;
 pub mod process;
 pub mod asm_switch;
+pub mod scheduler;
 
 pub fn init() {
     gdt::init();
@@ -29,6 +30,7 @@ pub fn init() {
     unsafe { interrupts::PICS.lock().initialize() };
     x86_64::instructions::interrupts::enable();
 }
+
 pub trait Testable {
     fn run(&self) -> ();
 }

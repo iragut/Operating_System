@@ -2,12 +2,12 @@ use crate::{gdt, print, println};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
+use x86_64::VirtAddr;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
 use spin::Mutex;
 use x86_64::registers::control::Cr2;
 use x86_64::instructions::port::Port;
-use crate::asm_switch::do_switch;
 use crate::hlt_loop;
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -18,6 +18,10 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
+}
+
+extern "C" {
+    fn timer_interrupt_entry();
 }
 
 impl InterruptIndex {
@@ -41,8 +45,9 @@ lazy_static! {
             idt.double_fault
                 .set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
+            idt[InterruptIndex::Timer.as_usize()]
+                .set_handler_addr(VirtAddr::new(timer_interrupt_entry as u64));
         }
-        idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
 
         idt.page_fault.set_handler_fn(page_fault_handler);
@@ -54,22 +59,9 @@ pub fn init_idt() {
     IDT.load();
 }
 
-pub extern "x86-interrupt" fn timer_interrupt_handler(mut stack_frame: InterruptStackFrame) {
-    static mut TICK_COUNT: u64 = 0;
-    
-    unsafe {
-        TICK_COUNT += 1;
-
-        if TICK_COUNT % 18 != 0 {
-            PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
-            return;
-        }
-        
-        do_switch(&mut stack_frame);
-        
-        PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
-    }
-}
+// pub extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+//     static ref
+// }
 
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,

@@ -8,11 +8,11 @@ extern crate alloc;
 
 use bootloader::{entry_point, BootInfo};
 use core::panic::PanicInfo;
-use game_os::{allocator, serial_print};
+use game_os::allocator;
 use game_os::memory::{self, BootInfoFrameAllocator};
-use x86_64::VirtAddr;
-use game_os::process::SCHEDULER;
+use game_os::scheduler::SCHEDULER;
 use game_os::process::ProcessState;
+use x86_64::VirtAddr;
 
 entry_point!(main);
 
@@ -30,110 +30,151 @@ fn main(boot_info: &'static BootInfo) -> ! {
     loop {}
 }
 
-// Test process functions
-static mut COUNTER_A: u64 = 0;
-static mut COUNTER_B: u64 = 0;
-
-extern "C" fn test_process_a() {
-    loop {
-        unsafe { 
-            COUNTER_A += 1;
-            if COUNTER_A == 100 {
-                game_os::serial_print!("A");  // Use serial for tests
-            }
-        }
-        unsafe { core::arch::asm!("nop"); }
-    }
+fn with_scheduler<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut game_os::scheduler::ProcessManager) -> R,
+{
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let scheduler = unsafe { SCHEDULER.get() };
+        f(scheduler)
+    })
 }
 
-extern "C" fn test_process_b() {
-    loop {
-        unsafe { 
-            COUNTER_B += 1;
-            if COUNTER_B == 100 {
-                game_os::serial_print!("B");  // Use serial for tests
-            }
-        }
-        unsafe { core::arch::asm!("nop"); }
-    }
+extern "C" fn nop_process() {
+    loop { unsafe { core::arch::asm!("nop"); } }
 }
 
-extern "C" fn test_process_c() {
-    loop {
-        unsafe { core::arch::asm!("nop"); }
-    }
-}
-
+// Test 1: Basic creation
 #[test_case]
-fn test_process_creation() {
-    // Initialize process system
-    {
-        let mut scheduler = SCHEDULER.lock();
-        scheduler.init_kernel_process();
-        
-        let pid1 = scheduler.create_process(test_process_a);
-        let pid2 = scheduler.create_process(test_process_b);
-        
+fn test_create_two_processes() {
+    with_scheduler(|s| {
+        s.reset();
+        s.init_kernel_process();
+
+        let pid1 = s.create_process(nop_process);
+        let pid2 = s.create_process(nop_process);
+
         assert_eq!(pid1, 1);
         assert_eq!(pid2, 2);
-        assert_eq!(scheduler.processes.len(), 3);  // 0, 1, 2
-
-        scheduler.terminate_process(pid1);
-        scheduler.terminate_process(pid2);
-    }    
+        assert_eq!(s.processes.len(), 3);
+        assert_eq!(s.processes.get(&pid1).unwrap().get_state(), ProcessState::Ready);
+        assert_eq!(s.processes.get(&pid2).unwrap().get_state(), ProcessState::Ready);
+    });
 }
 
+// Test 2: Round robin order
 #[test_case]
-fn test_process_termination_simple() {
-    {
-        let mut scheduler = SCHEDULER.lock();
-        let pid = scheduler.create_process(test_process_c);
-        assert_eq!(scheduler.processes.get(&pid).unwrap().get_state(), ProcessState::Ready);
-        
-        scheduler.terminate_process(pid);
-        assert!(scheduler.processes.get(&pid).unwrap().get_state() == ProcessState::Terminated);
-    }
+fn test_schedule_order() {
+    with_scheduler(|s| {
+        s.reset();
+        s.init_kernel_process();
+
+        let pid1 = s.create_process(nop_process);
+        let pid2 = s.create_process(nop_process);
+        let pid3 = s.create_process(nop_process);
+
+        assert_eq!(s.schedule(), Some(pid1));
+        assert_eq!(s.schedule(), Some(pid2));
+        assert_eq!(s.schedule(), Some(pid3));
+        assert_eq!(s.schedule(), Some(0));
+        assert_eq!(s.schedule(), Some(pid1));
+    });
 }
 
+// Test 3: Terminate removes from queue
 #[test_case]
-fn test_process_termination_running() {
-    {
-        let mut scheduler = SCHEDULER.lock();
-        let pid = scheduler.create_process(test_process_a);
-        assert_eq!(scheduler.processes.get(&pid).unwrap().get_state(), ProcessState::Ready);
-        
-        scheduler.terminate_process(pid);
-        assert!(scheduler.processes.get(&pid).unwrap().get_state() == ProcessState::Terminated);
-        assert!(scheduler.current_pid.is_none() || scheduler.current_pid == Some(0));
-    }
+fn test_terminate_skips_dead() {
+    with_scheduler(|s| {
+        s.reset();
+        s.init_kernel_process();
+
+        let pid1 = s.create_process(nop_process);
+        let pid2 = s.create_process(nop_process);
+        let pid3 = s.create_process(nop_process);
+
+        s.terminate_process(pid2);
+        assert_eq!(s.schedule(), Some(pid1));
+        assert_eq!(s.schedule(), Some(pid3));
+        assert_eq!(s.schedule(), Some(0));
+        assert_eq!(s.schedule(), Some(pid1));
+    });
 }
 
+// Test 4: Terminate running process
 #[test_case]
-fn test_process_terminate_complex() {
-    {
-        let mut scheduler = SCHEDULER.lock();
-        let pid1 = scheduler.create_process(test_process_a);
-        let pid2 = scheduler.create_process(test_process_b);
-        let pid3 = scheduler.create_process(test_process_c);
-        
-        scheduler.schedule();
-        assert_eq!(scheduler.current_pid, Some(pid1));
-        assert_eq!(scheduler.processes.get(&pid1).unwrap().get_state(), ProcessState::Running);
-    
-        scheduler.terminate_process(pid1);
-        assert!(scheduler.processes.get(&pid1).unwrap().get_state() == ProcessState::Terminated);
-        assert!(scheduler.current_pid.is_none() || scheduler.current_pid == Some(4));
-        
-        let next_pid = scheduler.schedule();
-        assert!(next_pid == Some(pid2) || next_pid == Some(pid3));
-        if let Some(npid) = next_pid {
-            assert_eq!(scheduler.processes.get(&npid).unwrap().get_state(), ProcessState::Running);
+fn test_terminate_current() {
+    with_scheduler(|s| {
+        s.reset();
+        s.init_kernel_process();
+
+        let pid1 = s.create_process(nop_process);
+        let pid2 = s.create_process(nop_process);
+
+        s.schedule();
+        assert_eq!(s.current_pid, Some(pid1));
+
+        s.terminate_process(pid1);
+        assert_eq!(s.processes.get(&pid1).unwrap().get_state(), ProcessState::Terminated);
+
+        assert_eq!(s.schedule(), Some(pid2));
+    });
+}
+
+// Test 5: Ten processes round robin
+#[test_case]
+fn test_ten_processes() {
+    with_scheduler(|s| {
+        s.reset();
+        s.init_kernel_process();
+
+        let mut pids = [0u32; 10];
+        for i in 0..10 {
+            pids[i] = s.create_process(nop_process);
         }
-        scheduler.terminate_process(pid2);
-        scheduler.terminate_process(pid3);
 
-    }
+        for i in 0..10 {
+            assert_eq!(s.schedule(), Some(pids[i]));
+        }
+        assert_eq!(s.schedule(), Some(0));
+        assert_eq!(s.schedule(), Some(pids[0]));
 
+        for pid in pids.iter() {
+            s.terminate_process(*pid);
+        }
+    });
+}
+
+// Test 6: Initial saved state is correct
+#[test_case]
+fn test_initial_cpu_state() {
+    with_scheduler(|s| {
+        s.reset();
+        s.init_kernel_process();
+
+        let pid = s.create_process(nop_process);
+        let process = s.processes.get(&pid).unwrap();
+
+        assert!(!process.saved_state.is_null());
+        let state = unsafe { &*process.saved_state };
+        assert_eq!(state.cs, 0x08);
+        assert_eq!(state.ss, 0x10);
+        assert_eq!(state.rflags, 0x202);
+        assert!(state.rip > 0);
+    });
+}
+
+// Test 7: Kernel process starts as running with null state
+#[test_case]
+fn test_kernel_process() {
+    with_scheduler(|s| {
+        s.reset();
+        s.init_kernel_process();
+
+        let p = s.processes.get(&0).unwrap();
+        assert!(p.saved_state.is_null());
+        assert_eq!(p.get_state(), ProcessState::Running);
+        assert_eq!(s.current_pid, Some(0));
+    });
 }
 
 #[panic_handler]

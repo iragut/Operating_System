@@ -8,20 +8,30 @@ use core::panic::PanicInfo;
 use game_os::{println};
 use bootloader::{BootInfo, entry_point};
 use game_os::memory::{self, BootInfoFrameAllocator};
+use game_os::scheduler::SCHEDULER;
 use game_os::allocator;
-use game_os::process::SCHEDULER;
-
 use x86_64::VirtAddr;
 
 extern crate alloc;
 
 entry_point!(kernel_main);
 
+extern "C" fn test_process() {
+    loop {
+        // This process just runs forever
+        // If context switching works, the kernel
+        // will keep switching between process 0 and this one
+    }
+}
+
 fn init_processes() {    
     println!("Initializing process management...");
     
-    let mut scheduler = SCHEDULER.lock();
-    scheduler.init_kernel_process();
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let scheduler = unsafe { SCHEDULER.get() };
+        scheduler.init_kernel_process();
+        scheduler.create_process(test_process);
+    });
     
 }
 
