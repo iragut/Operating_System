@@ -10,6 +10,7 @@ use bootloader::{BootInfo, entry_point};
 use game_os::memory::{self, BootInfoFrameAllocator};
 use game_os::scheduler::SCHEDULER;
 use game_os::allocator;
+use game_os::serial_println;
 use x86_64::VirtAddr;
 
 extern crate alloc;
@@ -35,14 +36,21 @@ fn init_processes() {
     
 }
 
-fn heap_init( boot_info: &'static BootInfo) {
+fn heap_init(boot_info: &'static BootInfo) {
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = unsafe {
+    let frame_allocator = unsafe {
         BootInfoFrameAllocator::init(&boot_info.memory_map)
     };
 
-    allocator::init_heap(&mut mapper, &mut frame_allocator)
+    // Store globals
+    unsafe {
+        memory::PHYS_MEM_OFFSET = phys_mem_offset.as_u64();
+        memory::FRAME_ALLOCATOR.init(frame_allocator);
+    }
+
+    let alloc = unsafe { memory::FRAME_ALLOCATOR.get() };
+    allocator::init_heap(&mut mapper, alloc)
         .expect("heap initialization failed");
 
     println!("Heap initialized successfully!");

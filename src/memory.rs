@@ -1,14 +1,21 @@
 use x86_64::{structures::paging::PageTable, VirtAddr};
 use x86_64::structures::paging::OffsetPageTable;
 use x86_64::registers::control::Cr3;
+use core::cell::UnsafeCell;
 use bootloader::bootinfo::MemoryMap;
 use x86_64::{PhysAddr, structures::paging::{PhysFrame, Size4KiB, FrameAllocator}};
 use bootloader::bootinfo::MemoryRegionType;
+use alloc::vec;
+use alloc::boxed::Box;
 
 pub struct BootInfoFrameAllocator {
     memory_map: &'static MemoryMap,
     next: usize,
 }
+
+pub struct FrameAllocatorCell(UnsafeCell<Option<BootInfoFrameAllocator>>);
+
+
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
         let frame = self.usable_frames().nth(self.next);
@@ -48,6 +55,26 @@ impl BootInfoFrameAllocator {
     }
 }
 
+unsafe impl Sync for FrameAllocatorCell {}
+unsafe impl Send for FrameAllocatorCell {}
+
+impl FrameAllocatorCell {
+    const fn new() -> Self {
+        FrameAllocatorCell(UnsafeCell::new(None))
+    }
+
+    pub unsafe fn get(&self) -> &mut BootInfoFrameAllocator {
+        (*self.0.get()).as_mut().expect("Frame allocator not initialized")
+    }
+
+    pub unsafe fn init(&self, alloc: BootInfoFrameAllocator) {
+        *self.0.get() = Some(alloc);
+    }
+}
+
+pub static FRAME_ALLOCATOR: FrameAllocatorCell = FrameAllocatorCell::new();
+pub static mut PHYS_MEM_OFFSET: u64 = 0;
+
 pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
     unsafe {
         let level_4_table = active_level_4_table(physical_memory_offset);
@@ -55,7 +82,7 @@ pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static>
     }
 }
 
-unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
+pub unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
     -> &'static mut PageTable
 {
 
@@ -67,9 +94,6 @@ unsafe fn active_level_4_table(physical_memory_offset: VirtAddr)
 
     unsafe { &mut *page_table_ptr }
 }
-
-use alloc::vec;
-use alloc::boxed::Box;
 
 pub fn allocate_kernel_stack() -> VirtAddr {
     // Allocate stack on the heap
@@ -88,4 +112,32 @@ pub fn allocate_kernel_stack() -> VirtAddr {
     };
     
     stack_top
+}
+
+pub fn create_process_page_table(
+    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+    phys_mem_offset: VirtAddr,
+) -> PhysFrame {
+
+    // Allocate a new frame for the process's page table
+    let phy_frame = frame_allocator.allocate_frame().expect("No more frames available");
+
+    let phy_addr = phy_frame.start_address();
+    let virt_addr = phys_mem_offset + phy_addr.as_u64();
+
+    // Zero it
+    let page_table_ptr: *mut PageTable = virt_addr.as_mut_ptr();
+    unsafe {
+        page_table_ptr.write(PageTable::new());
+    };
+
+    // Copy the kernel to the new page table
+    let kernel_table = unsafe { active_level_4_table(phys_mem_offset) };
+    let new_table = unsafe { &mut *page_table_ptr };
+
+    for i in 0..512 {
+        new_table[i] = kernel_table[i].clone();
+    }
+
+    phy_frame
 }

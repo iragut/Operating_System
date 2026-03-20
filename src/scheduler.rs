@@ -100,7 +100,12 @@ impl ProcessManager {
             };
         }
 
-        
+        let phys_mem_offset = unsafe { 
+            VirtAddr::new(crate::memory::PHYS_MEM_OFFSET) 
+        };
+        let frame_alloc = unsafe { crate::memory::FRAME_ALLOCATOR.get() };
+        let page_table_frame = crate::memory::create_process_page_table(
+        frame_alloc, phys_mem_offset);
 
         let process = Box::new(ProcessBlock {
             pid,
@@ -109,7 +114,7 @@ impl ProcessManager {
             parent_pid: 0,
             saved_state: state_ptr,
             memory: ProcessMemory::new(
-                Cr3::read().0.start_address(),
+                page_table_frame.start_address(),
                 VirtAddr::new(entry_point as u64),
                 VirtAddr::new(0),
                 VirtAddr::new(crate::allocator::HEAP_START as u64),
