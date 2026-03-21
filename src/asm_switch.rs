@@ -1,3 +1,4 @@
+use crate::gdt::set_tss_rsp0;
 use crate::scheduler::SCHEDULER;
 use crate::serial_println;
 
@@ -67,6 +68,8 @@ pub extern "C" fn switch_context(current_state: *mut CpuState) -> *mut CpuState 
             if let Some(next) = scheduler.processes.get(&next_pid) {
                 let cr3_addr = next.memory.page_table_addr;                
                 let (current_cr3, _) = x86_64::registers::control::Cr3::read();
+
+                set_tss_rsp0(next.kernel_stack);
                 
                 if current_cr3.start_address() != cr3_addr {
                     core::arch::asm!(

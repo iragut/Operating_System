@@ -1,11 +1,14 @@
 use x86_64::{structures::paging::PageTable, VirtAddr};
+ use x86_64::structures::paging::page_table::PageTableEntry;
 use x86_64::structures::paging::OffsetPageTable;
+use x86_64::structures::paging::PageTableFlags;
 use x86_64::registers::control::Cr3;
 use core::cell::UnsafeCell;
 use bootloader::bootinfo::MemoryMap;
 use x86_64::{PhysAddr, structures::paging::{PhysFrame, Size4KiB, FrameAllocator}};
 use bootloader::bootinfo::MemoryRegionType;
 use alloc::vec;
+
 use alloc::boxed::Box;
 
 pub struct BootInfoFrameAllocator {
@@ -140,4 +143,55 @@ pub fn create_process_page_table(
     }
 
     phy_frame
+}
+
+fn get_or_create_table(entry: &mut PageTableEntry, phys_mem_offset: VirtAddr,
+    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+) -> PhysFrame {
+    if entry.is_unused() {
+        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+        let frame = frame_allocator.allocate_frame().expect("No more frames");
+
+        let table_ptr = (phys_mem_offset + frame.start_address().as_u64()).as_mut_ptr::<PageTable>();
+        unsafe { table_ptr.write(PageTable::new()) };
+
+        entry.set_addr(frame.start_address(), flags);
+        frame
+    } else {
+        let flags = entry.flags() | PageTableFlags::USER_ACCESSIBLE;
+        entry.set_flags(flags);
+        PhysFrame::containing_address(entry.addr())
+    }
+}
+
+
+pub fn map_user_page(page_table_frame: PhysFrame,phys_mem_offset: VirtAddr,
+    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+    virt_addr: VirtAddr, flags: PageTableFlags,
+) -> PhysFrame {
+
+    // Get table reference from a physical frame
+    let table = |frame: PhysFrame| -> &mut PageTable {
+        unsafe { &mut *(phys_mem_offset + frame.start_address().as_u64()).as_mut_ptr::<PageTable>() }
+    };
+
+    // PML4 -> PDPT
+    let pml4 = table(page_table_frame);
+    let pdpt_frame = get_or_create_table(&mut pml4[virt_addr.p4_index()], phys_mem_offset, frame_allocator);
+
+    // PDPT -> PD
+    let pdpt = table(pdpt_frame);
+    let pd_frame = get_or_create_table(&mut pdpt[virt_addr.p3_index()], phys_mem_offset, frame_allocator);
+
+    // PD -> PT
+    let pd = table(pd_frame);
+    let pt_frame = get_or_create_table(&mut pd[virt_addr.p2_index()], phys_mem_offset, frame_allocator);
+
+    // PT
+    let pt = table(pt_frame);
+    let data_frame = frame_allocator.allocate_frame().expect("No more frames");
+    pt[virt_addr.p1_index()].set_addr(data_frame.start_address(), flags);
+
+    data_frame
+    
 }

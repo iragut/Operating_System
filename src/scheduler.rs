@@ -1,6 +1,9 @@
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
+
 use core::cell::UnsafeCell;
+
+use x86_64::structures::paging::PageTableFlags;
 use x86_64::registers::control::Cr3;
 use x86_64::VirtAddr;
 
@@ -68,6 +71,13 @@ impl ProcessManager {
     }
 
     pub fn create_process(&mut self, entry_point: extern "C" fn()) -> u32 {
+        const USER_CODE_ADDR: u64 = 0x400000;
+        const USER_STACK_TOP: u64 = 0x800000;
+        const USER_STACK_BOTTOM: u64 = USER_STACK_TOP - 4096;
+
+        let user_flags = PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE | PageTableFlags::WRITABLE;
+        let user_stack_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+
         let pid = self.next_pid;
         self.next_pid += 1;
 
@@ -92,11 +102,11 @@ impl ProcessManager {
                 rcx: 0,
                 rbx: 0,
                 rax: 0,
-                rip: entry_point as u64,
-                cs: 0x08,
+                rip: USER_CODE_ADDR,
+                cs: crate::gdt::user_code_selector().0 as u64,
                 rflags: 0x202,
-                rsp: stack_top,
-                ss: 0x10,
+                rsp: USER_STACK_TOP,
+                ss: crate::gdt::user_data_selector().0 as u64,
             };
         }
 
@@ -104,8 +114,19 @@ impl ProcessManager {
             VirtAddr::new(crate::memory::PHYS_MEM_OFFSET) 
         };
         let frame_alloc = unsafe { crate::memory::FRAME_ALLOCATOR.get() };
-        let page_table_frame = crate::memory::create_process_page_table(
-        frame_alloc, phys_mem_offset);
+        let page_table_frame = crate::memory::create_process_page_table(frame_alloc, phys_mem_offset);
+
+        let code_frame = crate::memory::map_user_page(page_table_frame, phys_mem_offset,
+            frame_alloc, VirtAddr::new(USER_CODE_ADDR), user_flags);
+
+        let stack_frame = crate::memory::map_user_page(page_table_frame, phys_mem_offset,
+            frame_alloc, VirtAddr::new(USER_STACK_BOTTOM), user_stack_flags);
+
+        unsafe {
+            let src = entry_point as *const u8;
+            let dst = (phys_mem_offset + code_frame.start_address().as_u64()).as_mut_ptr::<u8>();
+            core::ptr::copy_nonoverlapping(src, dst, 4096);
+        }
 
         let process = Box::new(ProcessBlock {
             pid,

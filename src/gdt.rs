@@ -3,6 +3,8 @@ use spin::Mutex;
 use x86_64::VirtAddr;
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector};
 use x86_64::structures::tss::TaskStateSegment;
+use x86_64::instructions::segmentation::{CS, DS, SS, ES, FS, Segment};
+use x86_64::instructions::tables::load_tss;
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
@@ -35,6 +37,9 @@ lazy_static! {
         let tss_selector = unsafe {
             gdt.add_entry(Descriptor::tss_segment(&TSS_STORAGE))
         };
+
+        let user_data_selector = gdt.add_entry(Descriptor::user_data_segment());
+        let user_code_selector = gdt.add_entry(Descriptor::user_code_segment());
         
         (
             gdt,
@@ -42,6 +47,9 @@ lazy_static! {
                 code_selector,
                 data_selector,
                 tss_selector,
+                user_code_selector,
+                user_data_selector,
+
             },
         )
     };
@@ -51,11 +59,11 @@ struct Selectors {
     code_selector: SegmentSelector,
     data_selector: SegmentSelector,
     tss_selector: SegmentSelector,
+    user_code_selector: SegmentSelector,
+    user_data_selector: SegmentSelector,
 }
 
 pub fn init() {
-    use x86_64::instructions::segmentation::{CS, DS, SS, Segment};
-    use x86_64::instructions::tables::load_tss;
 
     lazy_static::initialize(&TSS);
     
@@ -65,5 +73,19 @@ pub fn init() {
         SS::set_reg(GDT.1.data_selector);
         DS::set_reg(GDT.1.data_selector);
         load_tss(GDT.1.tss_selector);
+    }
+}
+
+pub fn user_code_selector() -> SegmentSelector {
+    GDT.1.user_code_selector
+}
+
+pub fn user_data_selector() -> SegmentSelector {
+    GDT.1.user_data_selector
+}
+
+pub fn set_tss_rsp0(stack_addr: VirtAddr) {
+    unsafe {
+        TSS_STORAGE.privilege_stack_table[0] = stack_addr;
     }
 }
