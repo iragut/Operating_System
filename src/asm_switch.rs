@@ -1,6 +1,5 @@
 use crate::gdt::set_tss_rsp0;
 use crate::scheduler::SCHEDULER;
-use crate::serial_println;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

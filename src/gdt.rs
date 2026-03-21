@@ -3,7 +3,7 @@ use spin::Mutex;
 use x86_64::VirtAddr;
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector};
 use x86_64::structures::tss::TaskStateSegment;
-use x86_64::instructions::segmentation::{CS, DS, SS, ES, FS, Segment};
+use x86_64::instructions::segmentation::{CS, DS, SS, Segment};
 use x86_64::instructions::tables::load_tss;
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
@@ -23,7 +23,8 @@ lazy_static! {
             let stack_end = stack_start + STACK_SIZE;
             stack_end
         };
-        
+    
+        #[allow(static_mut_refs)]
         Mutex::new(&mut TSS_STORAGE)
     };
 }
@@ -34,6 +35,7 @@ lazy_static! {
         let code_selector = gdt.add_entry(Descriptor::kernel_code_segment());
         let data_selector = gdt.add_entry(Descriptor::kernel_data_segment());
         
+        #[allow(static_mut_refs)]
         let tss_selector = unsafe {
             gdt.add_entry(Descriptor::tss_segment(&TSS_STORAGE))
         };

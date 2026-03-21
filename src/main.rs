@@ -10,7 +10,6 @@ use bootloader::{BootInfo, entry_point};
 use game_os::memory::{self, BootInfoFrameAllocator};
 use game_os::scheduler::SCHEDULER;
 use game_os::allocator;
-use game_os::serial_println;
 use x86_64::VirtAddr;
 
 extern crate alloc;

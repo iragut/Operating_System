@@ -119,7 +119,7 @@ impl ProcessManager {
         let code_frame = crate::memory::map_user_page(page_table_frame, phys_mem_offset,
             frame_alloc, VirtAddr::new(USER_CODE_ADDR), user_flags);
 
-        let stack_frame = crate::memory::map_user_page(page_table_frame, phys_mem_offset,
+        crate::memory::map_user_page(page_table_frame, phys_mem_offset,
             frame_alloc, VirtAddr::new(USER_STACK_BOTTOM), user_stack_flags);
 
         unsafe {

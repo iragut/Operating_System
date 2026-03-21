@@ -10,6 +10,7 @@ pub enum ProcessState {
     Terminated,
 }
 
+#[allow(dead_code)]
 pub struct ProcessMemory {
     pub page_table_addr: PhysAddr,
     code_start: VirtAddr,
