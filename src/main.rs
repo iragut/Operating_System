@@ -16,11 +16,29 @@ extern crate alloc;
 
 entry_point!(kernel_main);
 
-extern "C" fn test_process() {
-    loop {
-        // This process just runs forever
-        // If context switching works, the kernel
-        // will keep switching between process 0 and this one
+extern "C" fn test_syscall_process() {
+    unsafe {
+        core::arch::asm!(
+            "mov rax, 1",       // sys_write
+            "lea rdi, [rip+2f]", // pointer to string (relative addressing)
+            "mov rsi, 5",       // length
+            "int 0x80",
+            "jmp 3f",
+            "2: .ascii \"hello\"",
+            "3:",
+            out("rax") _,
+            out("rdi") _,
+            out("rsi") _,
+        );
+    }
+    unsafe {
+        core::arch::asm!(
+            "mov rax, 60",      // sys_exit
+            "xor rdi, rdi",     // status 0
+            "int 0x80",
+            out("rax") _,
+            out("rdi") _,
+        );
     }
 }
 
@@ -30,7 +48,7 @@ fn init_processes() {
     x86_64::instructions::interrupts::without_interrupts(|| {
         let scheduler = unsafe { SCHEDULER.get() };
         scheduler.init_kernel_process();
-        scheduler.create_process(test_process);
+        scheduler.create_process(test_syscall_process);
     });
     
 }

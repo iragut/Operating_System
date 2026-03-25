@@ -23,6 +23,7 @@ pub mod memory;
 pub mod process;
 pub mod asm_switch;
 pub mod scheduler;
+pub mod syscall;
 
 pub fn init() {
     gdt::init();

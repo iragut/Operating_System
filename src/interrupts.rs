@@ -24,6 +24,10 @@ extern "C" {
     fn timer_interrupt_entry();
 }
 
+extern "C" {
+    fn syscall_interrupt_entry();
+}
+
 impl InterruptIndex {
     pub fn as_u8(self) -> u8 {
         self as u8
@@ -45,12 +49,19 @@ lazy_static! {
             idt.double_fault
                 .set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
+
             idt[InterruptIndex::Timer.as_usize()]
                 .set_handler_addr(VirtAddr::new(timer_interrupt_entry as u64));
+
+            idt[0x80]
+                .set_handler_addr(VirtAddr::new(syscall_interrupt_entry as u64))
+                .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+
         }
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
 
         idt.page_fault.set_handler_fn(page_fault_handler);
+        
         idt
     };
 }
@@ -58,10 +69,6 @@ lazy_static! {
 pub fn init_idt() {
     IDT.load();
 }
-
-// pub extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-//     static ref
-// }
 
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,

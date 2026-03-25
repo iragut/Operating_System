@@ -42,45 +42,48 @@ impl CpuState {
     }
 }
 
+pub unsafe fn switch_to_next(fallback: *mut CpuState) -> *mut CpuState {
+    let scheduler = SCHEDULER.get();
+
+    if let Some(next_pid) = scheduler.schedule() {
+        if let Some(next) = scheduler.processes.get(&next_pid) {
+            let cr3_addr = next.memory.page_table_addr;
+            let (current_cr3, _) = x86_64::registers::control::Cr3::read();
+
+            set_tss_rsp0(next.kernel_stack);
+
+            if current_cr3.start_address() != cr3_addr {
+                core::arch::asm!(
+                    "mov cr3, {}",
+                    in(reg) cr3_addr.as_u64(),
+                );
+            }
+            return next.saved_state;
+        }
+    }
+
+    fallback
+}
+
 #[no_mangle]
 pub extern "C" fn switch_context(current_state: *mut CpuState) -> *mut CpuState {
     static mut TICK_COUNT: u64 = 0;
-    
+
     unsafe {
         TICK_COUNT += 1;
-        
+
         if TICK_COUNT % 18 != 0 {
             return current_state;
         }
 
-        
         let scheduler = SCHEDULER.get();
-
-        
         if let Some(current_pid) = scheduler.current_pid {
             if let Some(process) = scheduler.processes.get_mut(&current_pid) {
                 process.saved_state = current_state;
             }
         }
-        
-        if let Some(next_pid) = scheduler.schedule() {
-            if let Some(next) = scheduler.processes.get(&next_pid) {
-                let cr3_addr = next.memory.page_table_addr;                
-                let (current_cr3, _) = x86_64::registers::control::Cr3::read();
 
-                set_tss_rsp0(next.kernel_stack);
-                
-                if current_cr3.start_address() != cr3_addr {
-                    core::arch::asm!(
-                        "mov cr3, {}",
-                        in(reg) cr3_addr.as_u64(),
-                    );
-                }
-                return next.saved_state;
-            }
-        }
-        
-        current_state
+        switch_to_next(current_state)
     }
 }
 

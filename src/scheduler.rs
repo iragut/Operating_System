@@ -47,6 +47,10 @@ impl ProcessManager {
         }
     }
 
+    pub fn get_current_pid(&self) -> Option<u32> {
+        self.current_pid
+    }
+
     pub fn schedule(&mut self) -> Option<u32> {
         // Move current to ready queue if still running
         if let Some(current) = self.current_pid {
