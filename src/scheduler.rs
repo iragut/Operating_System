@@ -74,7 +74,7 @@ impl ProcessManager {
         self.current_pid
     }
 
-    pub fn create_process(&mut self, entry_point: extern "C" fn()) -> u32 {
+   pub fn create_process(&mut self, program: &[u8]) -> u32 {
         const USER_CODE_ADDR: u64 = 0x400000;
         const USER_STACK_TOP: u64 = 0x800000;
         const USER_STACK_BOTTOM: u64 = USER_STACK_TOP - 4096;
@@ -114,23 +114,43 @@ impl ProcessManager {
             };
         }
 
-        let phys_mem_offset = unsafe { 
-            VirtAddr::new(crate::memory::PHYS_MEM_OFFSET) 
+        let phys_mem_offset = unsafe {
+            VirtAddr::new(crate::memory::PHYS_MEM_OFFSET)
         };
         let frame_alloc = unsafe { crate::memory::FRAME_ALLOCATOR.get() };
         let page_table_frame = crate::memory::create_process_page_table(frame_alloc, phys_mem_offset);
 
-        let code_frame = crate::memory::map_user_page(page_table_frame, phys_mem_offset,
-            frame_alloc, VirtAddr::new(USER_CODE_ADDR), user_flags);
+        // Map code pages
+        let num_pages = (program.len() + 4095) / 4096;
+        let mut offset = 0;
 
-        crate::memory::map_user_page(page_table_frame, phys_mem_offset,
-            frame_alloc, VirtAddr::new(USER_STACK_BOTTOM), user_stack_flags);
+        for i in 0..num_pages {
+            let page_addr = USER_CODE_ADDR + (i as u64 * 4096);
+            let code_frame = crate::memory::map_user_page(
+                page_table_frame, phys_mem_offset,
+                frame_alloc, VirtAddr::new(page_addr), user_flags,
+            );
 
-        unsafe {
-            let src = entry_point as *const u8;
             let dst = (phys_mem_offset + code_frame.start_address().as_u64()).as_mut_ptr::<u8>();
-            core::ptr::copy_nonoverlapping(src, dst, 4096);
+            let remaining = program.len() - offset;
+            let to_copy = if remaining > 4096 { 4096 } else { remaining };
+
+            unsafe {
+                core::ptr::copy_nonoverlapping(program[offset..].as_ptr(), dst, to_copy);
+                // Zero the rest of the page if partial
+                if to_copy < 4096 {
+                    core::ptr::write_bytes(dst.add(to_copy), 0, 4096 - to_copy);
+                }
+            }
+
+            offset += 4096;
         }
+
+        // Map stack page
+        crate::memory::map_user_page(
+            page_table_frame, phys_mem_offset,
+            frame_alloc, VirtAddr::new(USER_STACK_BOTTOM), user_stack_flags,
+        );
 
         let process = Box::new(ProcessBlock {
             pid,
@@ -140,7 +160,7 @@ impl ProcessManager {
             saved_state: state_ptr,
             memory: ProcessMemory::new(
                 page_table_frame.start_address(),
-                VirtAddr::new(entry_point as u64),
+                VirtAddr::new(USER_CODE_ADDR),
                 VirtAddr::new(0),
                 VirtAddr::new(crate::allocator::HEAP_START as u64),
                 kernel_stack,

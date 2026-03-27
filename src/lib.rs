@@ -25,6 +25,9 @@ pub mod asm_switch;
 pub mod scheduler;
 pub mod syscall;
 
+pub mod input;
+pub mod ulib;
+
 pub fn init() {
     gdt::init();
     interrupts::init_idt();

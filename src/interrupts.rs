@@ -8,6 +8,7 @@ use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
 use spin::Mutex;
 use x86_64::registers::control::Cr2;
 use x86_64::instructions::port::Port;
+use alloc::format;
 use crate::hlt_loop;
 
 pub const PIC_1_OFFSET: u8 = 32;
@@ -94,7 +95,6 @@ extern "x86-interrupt" fn double_fault_handler(
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-
     lazy_static! {
         static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
             Mutex::new(Keyboard::new(
@@ -111,8 +111,22 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
-                DecodedKey::Unicode(character) => print!("{}", character),
-                DecodedKey::RawKey(key) => print!("{:?}", key),
+                DecodedKey::Unicode(character) => {
+                    let mut bytes = [0u8; 4];
+                    let s = character.encode_utf8(&mut bytes);
+                    let input = unsafe { crate::input::INPUT.get() };
+                    for byte in s.bytes() {
+                        input.push(byte);
+                    }
+                }
+                DecodedKey::RawKey(_key) => {
+                    let mut bytes = [0u8; 4];
+                    let s = format!("{:?}", _key);
+                    let input = unsafe { crate::input::INPUT.get() };
+                    for byte in s.bytes() {
+                        input.push(byte);
+                    }
+                }
             }
         }
     }

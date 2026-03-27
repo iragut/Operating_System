@@ -5,7 +5,7 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
-use game_os::{println};
+use game_os::{println, ulib};
 use bootloader::{BootInfo, entry_point};
 use game_os::memory::{self, BootInfoFrameAllocator};
 use game_os::scheduler::SCHEDULER;
@@ -16,31 +16,8 @@ extern crate alloc;
 
 entry_point!(kernel_main);
 
-extern "C" fn test_syscall_process() {
-    unsafe {
-        core::arch::asm!(
-            "mov rax, 1",       // sys_write
-            "lea rdi, [rip+2f]", // pointer to string (relative addressing)
-            "mov rsi, 5",       // length
-            "int 0x80",
-            "jmp 3f",
-            "2: .ascii \"hello\"",
-            "3:",
-            out("rax") _,
-            out("rdi") _,
-            out("rsi") _,
-        );
-    }
-    unsafe {
-        core::arch::asm!(
-            "mov rax, 60",      // sys_exit
-            "xor rdi, rdi",     // status 0
-            "int 0x80",
-            out("rax") _,
-            out("rdi") _,
-        );
-    }
-}
+const ECHO_PROGRAM: &[u8] = include_bytes!("../user/echo.bin");
+
 
 fn init_processes() {    
     println!("Initializing process management...");
@@ -48,7 +25,7 @@ fn init_processes() {
     x86_64::instructions::interrupts::without_interrupts(|| {
         let scheduler = unsafe { SCHEDULER.get() };
         scheduler.init_kernel_process();
-        scheduler.create_process(test_syscall_process);
+        scheduler.create_process(ECHO_PROGRAM);
     });
     
 }

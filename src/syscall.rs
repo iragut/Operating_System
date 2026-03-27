@@ -1,6 +1,7 @@
 use crate::print;
 use crate::asm_switch::CpuState;
 use crate::scheduler::SCHEDULER;
+use crate::input::INPUT;
 
 core::arch::global_asm!(
     ".global syscall_interrupt_entry",
@@ -49,7 +50,21 @@ core::arch::global_asm!(
 );
 
 fn sys_read(state: &mut CpuState) -> *mut CpuState {
-    // TODO
+    let input = unsafe { INPUT.get() };
+    let buffer = state.rdi as *mut u8;
+    let length = state.rsi as usize;
+    let mut count = 0;
+
+    while count < length {
+        if let Some(byte) = input.pop() {
+            unsafe { *buffer.add(count) = byte; }
+            count += 1;
+        } else {
+            break;
+        }
+    }
+
+    state.rax = count as u64;
     state as *mut CpuState
 }
 
