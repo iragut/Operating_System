@@ -26,32 +26,20 @@ pub struct Input {
     buffer: [u8; 256],
     head: usize,
     tail: usize,
-    waiting_pid: Option<u32>,
+    pub waiting_pid: Option<u32>,
 }
 
 impl Input {
-    pub fn new() -> Self {
-        Self {
-            buffer: [0; 256],
-            head: 0,
-            tail: 0,
-            waiting_pid: None,
-        }
-    }
-
     pub fn push(&mut self, byte: u8) {
-        // Check if buffer is full
         let next_head = (self.head + 1) % self.buffer.len();
         if next_head != self.tail {
             self.buffer[self.head] = byte;
             self.head = next_head;
 
-
-            // Wake waiting process if any exists
             if let Some(pid) = self.waiting_pid.take() {
-                let scheduler = unsafe { crate::scheduler::SCHEDULER.get() };
+                let scheduler = unsafe { crate::proc::scheduler::SCHEDULER.get() };
                 if let Some(process) = scheduler.processes.get_mut(&pid) {
-                    process.set_state(crate::process::ProcessState::Ready);
+                    process.set_state(crate::proc::process::ProcessState::Ready);
                     scheduler.ready_queue.push_back(pid);
                 }
             }
@@ -88,6 +76,4 @@ impl Input {
         self.head = 0;
         self.tail = 0;
     }
-
-
 }

@@ -7,9 +7,9 @@ use x86_64::structures::paging::PageTableFlags;
 use x86_64::registers::control::Cr3;
 use x86_64::VirtAddr;
 
-use crate::asm_switch::CpuState;
-use crate::memory::allocate_kernel_stack;
-use crate::process::{ProcessBlock, ProcessMemory, ProcessState};
+use crate::arch::asm_switch::CpuState;
+use crate::mem::memory::allocate_kernel_stack;
+use crate::proc::process::{ProcessBlock, ProcessMemory, ProcessState};
 
 
 pub struct SchedulerCell(UnsafeCell<ProcessManager>);
@@ -22,7 +22,6 @@ impl SchedulerCell {
         SchedulerCell(UnsafeCell::new(pm))
     }
 
-    // Caller must ensure interrupts are disabled.
     pub unsafe fn get(&self) -> &mut ProcessManager {
         &mut *self.0.get()
     }
@@ -47,12 +46,7 @@ impl ProcessManager {
         }
     }
 
-    pub fn get_current_pid(&self) -> Option<u32> {
-        self.current_pid
-    }
-
     pub fn schedule(&mut self) -> Option<u32> {
-        // Move current to ready queue if still running
         if let Some(current) = self.current_pid {
             if let Some(proc) = self.processes.get_mut(&current) {
                 if matches!(proc.state, ProcessState::Running) {
@@ -62,7 +56,6 @@ impl ProcessManager {
             }
         }
 
-        // Get next from ready queue
         if let Some(next_pid) = self.ready_queue.pop_front() {
             if let Some(proc) = self.processes.get_mut(&next_pid) {
                 proc.state = ProcessState::Running;
@@ -74,7 +67,7 @@ impl ProcessManager {
         self.current_pid
     }
 
-   pub fn create_process(&mut self, program: &[u8]) -> u32 {
+    pub fn create_process(&mut self, program: &[u8]) -> u32 {
         const USER_CODE_ADDR: u64 = 0x400000;
         const USER_STACK_TOP: u64 = 0x800000;
         const USER_STACK_BOTTOM: u64 = USER_STACK_TOP - 4096;
@@ -107,18 +100,18 @@ impl ProcessManager {
                 rbx: 0,
                 rax: 0,
                 rip: USER_CODE_ADDR,
-                cs: crate::gdt::user_code_selector().0 as u64,
+                cs: crate::arch::gdt::user_code_selector().0 as u64,
                 rflags: 0x202,
                 rsp: USER_STACK_TOP,
-                ss: crate::gdt::user_data_selector().0 as u64,
+                ss: crate::arch::gdt::user_data_selector().0 as u64,
             };
         }
 
         let phys_mem_offset = unsafe {
-            VirtAddr::new(crate::memory::PHYS_MEM_OFFSET)
+            VirtAddr::new(crate::mem::memory::PHYS_MEM_OFFSET)
         };
-        let frame_alloc = unsafe { crate::memory::FRAME_ALLOCATOR.get() };
-        let page_table_frame = crate::memory::create_process_page_table(frame_alloc, phys_mem_offset);
+        let frame_alloc = unsafe { crate::mem::memory::FRAME_ALLOCATOR.get() };
+        let page_table_frame = crate::mem::memory::create_process_page_table(frame_alloc, phys_mem_offset);
 
         // Map code pages
         let num_pages = (program.len() + 4095) / 4096;
@@ -126,7 +119,7 @@ impl ProcessManager {
 
         for i in 0..num_pages {
             let page_addr = USER_CODE_ADDR + (i as u64 * 4096);
-            let code_frame = crate::memory::map_user_page(
+            let code_frame = crate::mem::memory::map_user_page(
                 page_table_frame, phys_mem_offset,
                 frame_alloc, VirtAddr::new(page_addr), user_flags,
             );
@@ -137,7 +130,6 @@ impl ProcessManager {
 
             unsafe {
                 core::ptr::copy_nonoverlapping(program[offset..].as_ptr(), dst, to_copy);
-                // Zero the rest of the page if partial
                 if to_copy < 4096 {
                     core::ptr::write_bytes(dst.add(to_copy), 0, 4096 - to_copy);
                 }
@@ -147,7 +139,7 @@ impl ProcessManager {
         }
 
         // Map stack page
-        crate::memory::map_user_page(
+        crate::mem::memory::map_user_page(
             page_table_frame, phys_mem_offset,
             frame_alloc, VirtAddr::new(USER_STACK_BOTTOM), user_stack_flags,
         );
@@ -162,7 +154,7 @@ impl ProcessManager {
                 page_table_frame.start_address(),
                 VirtAddr::new(USER_CODE_ADDR),
                 VirtAddr::new(0),
-                VirtAddr::new(crate::allocator::HEAP_START as u64),
+                VirtAddr::new(crate::mem::allocator::HEAP_START as u64),
                 kernel_stack,
             ),
             kernel_stack,
@@ -185,7 +177,7 @@ impl ProcessManager {
                 Cr3::read().0.start_address(),
                 VirtAddr::new(0x200000),
                 VirtAddr::new(0x300000),
-                VirtAddr::new(crate::allocator::HEAP_START as u64),
+                VirtAddr::new(crate::mem::allocator::HEAP_START as u64),
                 VirtAddr::new(0),
             ),
             kernel_stack: VirtAddr::new(0),
@@ -217,7 +209,6 @@ impl ProcessManager {
         }
     }
 
-    // Function to use for testing
     pub fn reset(&mut self) {
         self.processes.clear();
         self.ready_queue.clear();

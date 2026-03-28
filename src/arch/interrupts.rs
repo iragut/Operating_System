@@ -1,4 +1,3 @@
-use crate::{gdt, print, println};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
@@ -8,8 +7,8 @@ use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
 use spin::Mutex;
 use x86_64::registers::control::Cr2;
 use x86_64::instructions::port::Port;
-use alloc::format;
-use crate::hlt_loop;
+use crate::arch::gdt;
+use crate::{println, hlt_loop};
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -57,12 +56,11 @@ lazy_static! {
             idt[0x80]
                 .set_handler_addr(VirtAddr::new(syscall_interrupt_entry as u64))
                 .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
-
         }
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
 
         idt.page_fault.set_handler_fn(page_fault_handler);
-        
+
         idt
     };
 }
@@ -75,7 +73,6 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
-
     println!("EXCEPTION: PAGE FAULT");
     println!("Accessed Address: {:?}", Cr2::read());
     println!("Error Code: {:?}", error_code);
@@ -114,19 +111,12 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
                 DecodedKey::Unicode(character) => {
                     let mut bytes = [0u8; 4];
                     let s = character.encode_utf8(&mut bytes);
-                    let input = unsafe { crate::input::INPUT.get() };
+                    let input = unsafe { crate::drivers::input::INPUT.get() };
                     for byte in s.bytes() {
                         input.push(byte);
                     }
                 }
-                DecodedKey::RawKey(_key) => {
-                    let mut bytes = [0u8; 4];
-                    let s = format!("{:?}", _key);
-                    let input = unsafe { crate::input::INPUT.get() };
-                    for byte in s.bytes() {
-                        input.push(byte);
-                    }
-                }
+                DecodedKey::RawKey(_key) => {}
             }
         }
     }
@@ -139,6 +129,5 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 
 #[test_case]
 fn test_breakpoint_exception() {
-    // invoke a breakpoint exception
     x86_64::instructions::interrupts::int3();
 }

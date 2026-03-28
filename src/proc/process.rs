@@ -1,4 +1,4 @@
-use crate::asm_switch::CpuState;
+use crate::arch::asm_switch::CpuState;
 use x86_64::PhysAddr;
 use x86_64::VirtAddr;
 

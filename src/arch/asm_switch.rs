@@ -1,5 +1,5 @@
-use crate::gdt::set_tss_rsp0;
-use crate::scheduler::SCHEDULER;
+use crate::arch::gdt::set_tss_rsp0;
+use crate::proc::scheduler::SCHEDULER;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -67,19 +67,19 @@ pub unsafe fn switch_to_next(fallback: *mut CpuState) -> *mut CpuState {
 
 #[no_mangle]
 pub extern "C" fn switch_context(current_state: *mut CpuState) -> *mut CpuState {
-    static mut TICK_COUNT: u64 = 0;
-
     unsafe {
-        TICK_COUNT += 1;
-
-        if TICK_COUNT % 18 != 0 {
-            return current_state;
-        }
-
         let scheduler = SCHEDULER.get();
+
         if let Some(current_pid) = scheduler.current_pid {
             if let Some(process) = scheduler.processes.get_mut(&current_pid) {
                 process.saved_state = current_state;
+                process.time += 1;
+
+                // Only switch if time slice expired
+                if process.time < 10 {
+                    return current_state;
+                }
+                process.time = 0;
             }
         }
 

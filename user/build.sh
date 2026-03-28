@@ -6,5 +6,5 @@ rustc \
     -C link-arg=--oformat=binary \
     -C relocation-model=static \
     -C panic=abort \
-    user/echo.rs \
-    -o user/echo.bin
+    user/shell.rs \
+    -o user/shell.bin

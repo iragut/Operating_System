@@ -5,29 +5,33 @@
 #![reexport_test_harness_main = "test_main"]
 
 use core::panic::PanicInfo;
-use game_os::{println, ulib};
+use game_os::println;
 use bootloader::{BootInfo, entry_point};
-use game_os::memory::{self, BootInfoFrameAllocator};
-use game_os::scheduler::SCHEDULER;
-use game_os::allocator;
+use game_os::mem::memory::{self, BootInfoFrameAllocator};
+use game_os::proc::scheduler::SCHEDULER;
+use game_os::mem::allocator;
+use game_os::fs::ramfs;
 use x86_64::VirtAddr;
+
 
 extern crate alloc;
 
 entry_point!(kernel_main);
 
-const ECHO_PROGRAM: &[u8] = include_bytes!("../user/echo.bin");
+const SHELL_PROGRAM: &[u8] = include_bytes!("../user/shell.bin");
 
-
-fn init_processes() {    
+fn init_processes() {
     println!("Initializing process management...");
-    
+
     x86_64::instructions::interrupts::without_interrupts(|| {
         let scheduler = unsafe { SCHEDULER.get() };
         scheduler.init_kernel_process();
-        scheduler.create_process(ECHO_PROGRAM);
+
+        let fs = unsafe { ramfs::RAMFS.get() };
+        if let Some(shell) = fs.find("shell") {
+            scheduler.create_process(shell.data);
+        }
     });
-    
 }
 
 fn heap_init(boot_info: &'static BootInfo) {
@@ -37,7 +41,6 @@ fn heap_init(boot_info: &'static BootInfo) {
         BootInfoFrameAllocator::init(&boot_info.memory_map)
     };
 
-    // Store globals
     unsafe {
         memory::PHYS_MEM_OFFSET = phys_mem_offset.as_u64();
         memory::FRAME_ALLOCATOR.init(frame_allocator);
@@ -55,10 +58,14 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     game_os::init();
 
     heap_init(boot_info);
+    unsafe {
+        let fs = ramfs::RAMFS.get();
+        fs.add("shell", SHELL_PROGRAM);
+    }
     init_processes();
 
     println!("It did not crash!");
-    // as before
+
     #[cfg(test)]
     test_main();
     game_os::hlt_loop();

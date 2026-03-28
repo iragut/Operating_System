@@ -13,25 +13,16 @@ extern crate alloc;
 #[cfg(test)]
 entry_point!(test_kernel_main);
 
-pub mod gdt;
-pub mod interrupts;
-pub mod allocator;
-
-pub mod serial;
-pub mod vga_buffer;
-pub mod memory;
-pub mod process;
-pub mod asm_switch;
-pub mod scheduler;
-pub mod syscall;
-
-pub mod input;
-pub mod ulib;
+pub mod arch;
+pub mod drivers;
+pub mod proc;
+pub mod mem;
+pub mod fs;
 
 pub fn init() {
-    gdt::init();
-    interrupts::init_idt();
-    unsafe { interrupts::PICS.lock().initialize() };
+    arch::gdt::init();
+    arch::interrupts::init_idt();
+    unsafe { arch::interrupts::PICS.lock().initialize() };
     x86_64::instructions::interrupts::enable();
 }
 
@@ -87,10 +78,8 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
     }
 }
 
-/// Entry point for `cargo xtest`
 #[cfg(test)]
 fn test_kernel_main(_boot_info: &'static BootInfo) -> ! {
-    // like before
     init();
     test_main();
     hlt_loop();
